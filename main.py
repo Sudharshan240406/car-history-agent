@@ -61,10 +61,16 @@ app.add_middleware(
 class GenerateRequest(BaseModel):
     topic: str
 
+class ImageItem(BaseModel):
+    url:              str
+    photographer:     str
+    photographer_url: str
+
 class GenerateResponse(BaseModel):
     script:    str
     wordCount: int
     filename:  str
+    images:    list[ImageItem] = []
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
@@ -106,6 +112,7 @@ def generate(req: GenerateRequest):
         script=result["script"],
         wordCount=result["wordCount"],
         filename=result["filename"],
+        images=result.get("images", []),
     )
 
 

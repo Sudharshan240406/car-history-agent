@@ -61,7 +61,7 @@ if _DDGS is None:
     )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-MODEL              = "gemini-2.5-flash"
+MODEL              = "gemini-3.5-flash"
 SCRIPTS_DIR        = Path("scripts")
 MAX_SEARCH_RESULTS = 5
 
@@ -69,6 +69,7 @@ SYSTEM_PROMPT = (
     "You are a scriptwriter for short-form car history videos (60-90 seconds spoken, ~150-200 words). "
     "Research using web_search before writing — search at least once, more if you need specific facts or dates. "
     "Use get_car_specs to pull exact engine, horsepower, 0-60, and price figures for a specific model year when the script needs precise numbers. "
+    "Use get_car_images after researching to fetch relevant high-quality car photos for visual assets. "
     "Keep tone punchy and factual, no fluff intro. "
     "Once the script is finalized, save it using save_script with a clear filename based on the topic."
 )
@@ -176,12 +177,60 @@ def get_car_specs(model_year: str) -> str:
     return result
 
 
+def get_car_images(query: str) -> str:
+    """
+    Fetch 3-4 car photos from Unsplash API for the query.
+    Returns a JSON string of a list of objects containing 'url' and 'photographer'.
+    """
+    key = os.environ.get("UNSPLASH_ACCESS_KEY")
+    if not key:
+        msg = "Error: UNSPLASH_ACCESS_KEY environment variable is not set."
+        print(f"   ❌  {msg}")
+        return msg
+
+    print(f"🖼️  Fetching images from Unsplash for: {query}")
+    try:
+        import requests
+        url = "https://api.unsplash.com/search/photos"
+        headers = {"Authorization": f"Client-ID {key}"}
+        params = {"query": query, "per_page": 4, "orientation": "landscape"}
+        resp = requests.get(url, headers=headers, params=params, timeout=10)
+        if resp.status_code != 200:
+            error_msg = f"Unsplash API error ({resp.status_code}): {resp.text[:200]}"
+            print(f"   ❌  {error_msg}")
+            return error_msg
+
+        data = resp.json()
+        results = data.get("results", [])
+        images = []
+        for item in results[:4]:
+            img_url = item.get("urls", {}).get("regular", "")
+            user = item.get("user", {})
+            photographer = user.get("name", "Unknown Photographer")
+            photographer_url = user.get("links", {}).get("html", "")
+            if img_url:
+                images.append({
+                    "url":              img_url,
+                    "photographer":     photographer,
+                    "photographer_url": photographer_url
+                })
+
+        print(f"   ✅  Got {len(images)} image(s) from Unsplash.")
+        return json.dumps(images, indent=2)
+
+    except Exception as exc:
+        error_msg = f"Failed to fetch images from Unsplash: {exc}"
+        print(f"   ❌  {error_msg}")
+        return error_msg
+
+
 # ── Tool dispatcher ───────────────────────────────────────────────────────────
 
 TOOL_FUNCTIONS = {
-    "web_search":   web_search,
-    "save_script":  save_script,
-    "get_car_specs": get_car_specs,
+    "web_search":     web_search,
+    "save_script":    save_script,
+    "get_car_specs":  get_car_specs,
+    "get_car_images": get_car_images,
 }
 
 
@@ -256,6 +305,24 @@ GEMINI_TOOLS = types.Tool(
                 required=["model_year"],
             ),
         ),
+        types.FunctionDeclaration(
+            name="get_car_images",
+            description=(
+                "Fetch 3-4 real car photos from Unsplash matching the car or topic. "
+                "Call this after research to retrieve visual assets for video production. "
+                "Pass query as a clear search string like 'Mazda RX-7' or '1993 Mazda RX-7 FD'."
+            ),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "query": types.Schema(
+                        type=types.Type.STRING,
+                        description="Search query for car photos, e.g., 'Mazda RX-7' or 'Nissan GT-R'.",
+                    )
+                },
+                required=["query"],
+            ),
+        ),
     ]
 )
 
@@ -296,8 +363,8 @@ def run_agent(topic: str) -> dict:
         )
     ]
 
-    # Captures the save_script call so we can return it to the caller
-    _saved: dict = {"script": "", "filename": ""}
+    # Captures the save_script call and get_car_images call for the return value
+    _saved: dict = {"script": "", "filename": "", "images": []}
 
     iteration = 0
 
@@ -305,11 +372,26 @@ def run_agent(topic: str) -> dict:
         iteration += 1
         print(f"── Agent turn {iteration} ─────────────────────────────────────")
 
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=contents,
-            config=GENERATE_CONFIG,
-        )
+        response = None
+        for attempt in range(5):
+            try:
+                response = client.models.generate_content(
+                    model=MODEL,
+                    contents=contents,
+                    config=GENERATE_CONFIG,
+                )
+                break
+            except Exception as exc:
+                if "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc):
+                    print(f"   ⏳ Hit rate limit (429). Waiting 15s before retry... (Attempt {attempt+1}/5)")
+                    import time
+                    time.sleep(15)
+                else:
+                    raise exc
+
+        if response is None:
+            print("❌ Failed to get response after retries.")
+            break
 
         # ── Inspect the response candidate ────────────────────────────────────
         candidate = response.candidates[0] if response.candidates else None
@@ -345,17 +427,8 @@ def run_agent(topic: str) -> dict:
             break
 
         # ── Execute each function call ─────────────────────────────────────────
-        # Rebuild the model turn using ONLY valid parts (function_call or text).
-        # Appending raw candidate.content can include empty/internal SDK parts
-        # that Gemini rejects in subsequent turns with "model output must contain
-        # either output text or tool calls" — so we strip those out first.
-        valid_model_parts = [
-            p for p in all_parts if p.function_call or (p.text and p.text.strip())
-        ]
-        if valid_model_parts:
-            contents.append(
-                types.Content(role="model", parts=valid_model_parts)
-            )
+        # Append candidate.content directly for the model turn
+        contents.append(candidate.content)
 
         # Build one user Content containing all function_response parts
         response_parts = []
@@ -371,8 +444,18 @@ def run_agent(topic: str) -> dict:
                 _saved["filename"] = fn_args.get("filename", "")
             elif fn_name == "get_car_specs":
                 print(f"📋 Fetching specs: {fn_args.get('model_year', '?')}")
+            elif fn_name == "get_car_images":
+                print(f"🖼️  Fetching images: {fn_args.get('query', '?')}")
 
             result_str = execute_tool(fn_name, fn_args)
+
+            if fn_name == "get_car_images":
+                try:
+                    parsed_imgs = json.loads(result_str)
+                    if isinstance(parsed_imgs, list):
+                        _saved["images"] = parsed_imgs
+                except Exception:
+                    pass
 
             response_parts.append(
                 types.Part(
@@ -394,10 +477,12 @@ def run_agent(topic: str) -> dict:
 
     script   = _saved["script"]
     filename = _saved["filename"]
+    images   = _saved.get("images", [])
     return {
         "script":    script,
         "wordCount": len(script.split()),
         "filename":  filename,
+        "images":    images,
     }
 
 

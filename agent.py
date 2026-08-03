@@ -500,9 +500,9 @@ def run_agent(topic: str) -> dict:
     if not script:
         script = "\n\n".join(_last_text).strip()
     if not script:
-        script = (
-            f"The history of {topic} is a story of automotive passion, engineering innovation, and iconic design. "
-            f"From its debut to its modern legacy, the {topic} remains an legendary milestone in car history."
+        raise RuntimeError(
+            f"Failed to generate script for '{topic}': Gemini API rate limit or execution error. "
+            "Please wait a moment and try again."
         )
 
     filename = _saved["filename"] or topic.strip().lower().replace(" ", "_")

@@ -67,11 +67,8 @@ MAX_SEARCH_RESULTS = 5
 
 SYSTEM_PROMPT = (
     "You are a scriptwriter for short-form car history videos (60-90 seconds spoken, ~150-200 words). "
-    "Research using web_search before writing — search at least once, more if you need specific facts or dates. "
-    "Use get_car_specs to pull exact engine, horsepower, 0-60, and price figures for a specific model year when the script needs precise numbers. "
-    "Use get_car_images after researching to fetch relevant high-quality car photos for visual assets. "
-    "Keep tone punchy and factual, no fluff intro. "
-    "IMPORTANT: You MUST call save_script to save the finalized script with a clear filename based on the topic."
+    "Be fast and efficient: in your first turn, call web_search, get_car_specs, and get_car_images together to gather all facts, specs, and visual assets at once. "
+    "In your second turn, write a punchy, factual script and call save_script with a clear snake_case filename based on the topic."
 )
 
 # ── Tool implementations ───────────────────────────────────────────────────────
@@ -383,7 +380,7 @@ def run_agent(topic: str) -> dict:
         print(f"── Agent turn {iteration} ─────────────────────────────────────")
 
         response = None
-        for attempt in range(5):
+        for attempt in range(8):
             try:
                 response = client.models.generate_content(
                     model=MODEL,
@@ -393,9 +390,9 @@ def run_agent(topic: str) -> dict:
                 break
             except Exception as exc:
                 if "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc):
-                    print(f"   ⏳ Hit rate limit (429). Waiting 15s before retry... (Attempt {attempt+1}/5)")
+                    print(f"   ⏳ Hit rate limit (429). Waiting 20s before retry... (Attempt {attempt+1}/8)")
                     import time
-                    time.sleep(15)
+                    time.sleep(20)
                 else:
                     raise exc
 

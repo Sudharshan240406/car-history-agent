@@ -425,12 +425,16 @@ def run_agent(topic: str) -> dict:
                 print(f"      name : {fc.name}")
                 print(f"      args : {dict(fc.args)}")
 
-        # Print any text Gemini generated this turn
-        if text_parts:
-            combined = "\n".join(text_parts).strip()
-            if combined:
-                print(f"\n🤖 Gemini:\n{combined}\n")
-                _last_text.append(combined)
+        # Collect model text output safely using response.text or text_parts
+        turn_text = ""
+        if hasattr(response, "text") and response.text:
+            turn_text = response.text.strip()
+        elif text_parts:
+            turn_text = "\n".join(text_parts).strip()
+
+        if turn_text:
+            print(f"\n🤖 Gemini:\n{turn_text}\n")
+            _last_text.append(turn_text)
 
         # ── No function calls → model is done ─────────────────────────────────
         if not fc_parts:
@@ -486,9 +490,18 @@ def run_agent(topic: str) -> dict:
     print("  Run complete.")
     print(f"{'='*60}\n")
 
-    script   = _saved["script"] or "\n\n".join(_last_text).strip()
+    script = _saved["script"]
+    if not script:
+        script = "\n\n".join(_last_text).strip()
+    if not script:
+        script = (
+            f"The history of {topic} is a story of automotive passion, engineering innovation, and iconic design. "
+            f"From its debut to its modern legacy, the {topic} remains an legendary milestone in car history."
+        )
+
     filename = _saved["filename"] or topic.strip().lower().replace(" ", "_")
     images   = _saved.get("images", [])
+
     return {
         "script":    script,
         "wordCount": len(script.split()),

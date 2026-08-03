@@ -67,8 +67,12 @@ MAX_SEARCH_RESULTS = 5
 
 SYSTEM_PROMPT = (
     "You are a scriptwriter for short-form car history videos (60-90 seconds spoken, ~150-200 words). "
-    "Be fast and efficient: in your first turn, call web_search, get_car_specs, and get_car_images together to gather all facts, specs, and visual assets at once. "
-    "In your second turn, write a punchy, factual script and call save_script with a clear snake_case filename based on the topic."
+    "Follow this step-by-step workflow: "
+    "1. First, call web_search and get_car_specs to gather all necessary facts and numbers. "
+    "2. Next, write the script featuring clear [Visual: ...] cues for each key scene or era. "
+    "3. Call get_car_images ONCE PER DISTINCT VISUAL BEAT [Visual: ...] in your script, passing a specific, descriptive search query "
+    "extracted from that visual cue (e.g. '1906 Rolls-Royce Silver Ghost vintage', 'Rolls-Royce Phantom VII city night', 'Rolls-Royce Spectre EV electric'). "
+    "4. Call save_script with a clear snake_case filename to save the finalized script."
 )
 
 # ── Tool implementations ───────────────────────────────────────────────────────
@@ -176,58 +180,57 @@ def get_car_specs(model_year: str) -> str:
 
 def get_car_images(query: str) -> str:
     """
-    Fetch 3-4 car photos from Unsplash API for the query.
-    Returns a JSON string of a list of objects containing 'url', 'photographer', and 'photographer_url'.
+    Fetch 1 best-matching car photo from Unsplash API for a specific visual beat or scene query.
+    Returns a JSON string of a list containing 1 image object with 'url', 'photographer', 'photographer_url', and 'scene'.
     """
     key = os.environ.get("UNSPLASH_ACCESS_KEY")
-    fallback_images = [
-        {
-            "url": "https://images.unsplash.com/photo-1617814076367-b759c7d7e738?auto=format&fit=crop&w=1080&q=80",
-            "photographer": "Unsplash Car Showcase",
-            "photographer_url": "https://unsplash.com/s/photos/car"
-        }
-    ]
+    fallback_image = {
+        "url": "https://images.unsplash.com/photo-1617814076367-b759c7d7e738?auto=format&fit=crop&w=1080&q=80",
+        "photographer": "Unsplash Car Showcase",
+        "photographer_url": "https://unsplash.com/s/photos/car",
+        "scene": query,
+    }
 
     if not key:
-        print("   ⚠️  UNSPLASH_ACCESS_KEY not set. Returning fallback Unsplash image.")
-        return json.dumps(fallback_images, indent=2)
+        print(f"   ⚠️  UNSPLASH_ACCESS_KEY not set. Returning fallback Unsplash image for '{query}'.")
+        return json.dumps([fallback_image], indent=2)
 
-    print(f"🖼️  Fetching images from Unsplash for: {query}")
+    print(f"🖼️  Fetching 1 image from Unsplash for visual scene: '{query}'")
     try:
         import requests
         url = "https://api.unsplash.com/search/photos"
         headers = {"Authorization": f"Client-ID {key}"}
-        params = {"query": query, "per_page": 4, "orientation": "landscape"}
+        params = {"query": query, "per_page": 1, "orientation": "landscape"}
         resp = requests.get(url, headers=headers, params=params, timeout=10)
         if resp.status_code != 200:
-            error_msg = f"Unsplash API HTTP {resp.status_code}"
-            print(f"   ⚠️  {error_msg}. Using fallback image.")
-            return json.dumps(fallback_images, indent=2)
+            print(f"   ⚠️  Unsplash API HTTP {resp.status_code}. Using fallback image.")
+            return json.dumps([fallback_image], indent=2)
 
         data = resp.json()
         results = data.get("results", [])
-        images = []
-        for item in results[:4]:
-            img_url = item.get("urls", {}).get("regular", "")
-            user = item.get("user", {})
-            photographer = user.get("name", "Unknown Photographer")
-            photographer_url = user.get("links", {}).get("html", "https://unsplash.com")
-            if img_url:
-                images.append({
-                    "url":              img_url,
-                    "photographer":     photographer,
-                    "photographer_url": photographer_url
-                })
+        if not results:
+            print(f"   ⚠️  No Unsplash results for '{query}'. Using fallback image.")
+            return json.dumps([fallback_image], indent=2)
 
-        if not images:
-            images = fallback_images
+        item = results[0]
+        img_url = item.get("urls", {}).get("regular", "")
+        user = item.get("user", {})
+        photographer = user.get("name", "Unknown Photographer")
+        photographer_url = user.get("links", {}).get("html", "https://unsplash.com")
 
-        print(f"   ✅  Got {len(images)} image(s) from Unsplash.")
-        return json.dumps(images, indent=2)
+        image_data = [{
+            "url":              img_url or fallback_image["url"],
+            "photographer":     photographer,
+            "photographer_url": photographer_url,
+            "scene":            query,
+        }]
+
+        print(f"   ✅  Got 1 scene image for '{query}' by {photographer}.")
+        return json.dumps(image_data, indent=2)
 
     except Exception as exc:
-        print(f"   ⚠️  Failed to fetch images from Unsplash: {exc}. Using fallback image.")
-        return json.dumps(fallback_images, indent=2)
+        print(f"   ⚠️  Failed to fetch image for '{query}': {exc}. Using fallback image.")
+        return json.dumps([fallback_image], indent=2)
 
 
 # ── Tool dispatcher ───────────────────────────────────────────────────────────
@@ -314,16 +317,16 @@ GEMINI_TOOLS = types.Tool(
         types.FunctionDeclaration(
             name="get_car_images",
             description=(
-                "Fetch 3-4 real car photos from Unsplash matching the car or topic. "
-                "Call this after research to retrieve visual assets for video production. "
-                "Pass query as a clear search string like 'Mazda RX-7' or '1993 Mazda RX-7 FD'."
+                "Fetch 1 best-matching car photo from Unsplash for a specific visual beat or scene in the script. "
+                "Call this ONCE PER DISTINCT VISUAL BEAT [Visual: ...] in your script, passing a specific, descriptive query "
+                "extracted from that visual cue (e.g. '1906 Rolls-Royce Silver Ghost vintage', 'Rolls-Royce Phantom VII city night', 'Rolls-Royce Spectre EV electric')."
             ),
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
                     "query": types.Schema(
                         type=types.Type.STRING,
-                        description="Search query for car photos, e.g., 'Mazda RX-7' or 'Nissan GT-R'.",
+                        description="Specific visual scene query matching a script [Visual: ...] cue.",
                     )
                 },
                 required=["query"],
@@ -469,7 +472,9 @@ def run_agent(topic: str) -> dict:
                 try:
                     parsed_imgs = json.loads(result_str)
                     if isinstance(parsed_imgs, list):
-                        _saved["images"] = parsed_imgs
+                        _saved["images"].extend(parsed_imgs)
+                    elif isinstance(parsed_imgs, dict):
+                        _saved["images"].append(parsed_imgs)
                 except Exception:
                     pass
 

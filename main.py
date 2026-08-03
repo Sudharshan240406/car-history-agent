@@ -65,6 +65,7 @@ class ImageItem(BaseModel):
     url:              str
     photographer:     str
     photographer_url: str
+    scene:            str
 
 class GenerateResponse(BaseModel):
     script:    str

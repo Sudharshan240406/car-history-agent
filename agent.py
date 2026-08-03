@@ -180,13 +180,20 @@ def get_car_specs(model_year: str) -> str:
 def get_car_images(query: str) -> str:
     """
     Fetch 3-4 car photos from Unsplash API for the query.
-    Returns a JSON string of a list of objects containing 'url' and 'photographer'.
+    Returns a JSON string of a list of objects containing 'url', 'photographer', and 'photographer_url'.
     """
     key = os.environ.get("UNSPLASH_ACCESS_KEY")
+    fallback_images = [
+        {
+            "url": "https://images.unsplash.com/photo-1617814076367-b759c7d7e738?auto=format&fit=crop&w=1080&q=80",
+            "photographer": "Unsplash Car Showcase",
+            "photographer_url": "https://unsplash.com/s/photos/car"
+        }
+    ]
+
     if not key:
-        msg = "Error: UNSPLASH_ACCESS_KEY environment variable is not set."
-        print(f"   ❌  {msg}")
-        return msg
+        print("   ⚠️  UNSPLASH_ACCESS_KEY not set. Returning fallback Unsplash image.")
+        return json.dumps(fallback_images, indent=2)
 
     print(f"🖼️  Fetching images from Unsplash for: {query}")
     try:
@@ -196,9 +203,9 @@ def get_car_images(query: str) -> str:
         params = {"query": query, "per_page": 4, "orientation": "landscape"}
         resp = requests.get(url, headers=headers, params=params, timeout=10)
         if resp.status_code != 200:
-            error_msg = f"Unsplash API error ({resp.status_code}): {resp.text[:200]}"
-            print(f"   ❌  {error_msg}")
-            return error_msg
+            error_msg = f"Unsplash API HTTP {resp.status_code}"
+            print(f"   ⚠️  {error_msg}. Using fallback image.")
+            return json.dumps(fallback_images, indent=2)
 
         data = resp.json()
         results = data.get("results", [])
@@ -207,7 +214,7 @@ def get_car_images(query: str) -> str:
             img_url = item.get("urls", {}).get("regular", "")
             user = item.get("user", {})
             photographer = user.get("name", "Unknown Photographer")
-            photographer_url = user.get("links", {}).get("html", "")
+            photographer_url = user.get("links", {}).get("html", "https://unsplash.com")
             if img_url:
                 images.append({
                     "url":              img_url,
@@ -215,13 +222,15 @@ def get_car_images(query: str) -> str:
                     "photographer_url": photographer_url
                 })
 
+        if not images:
+            images = fallback_images
+
         print(f"   ✅  Got {len(images)} image(s) from Unsplash.")
         return json.dumps(images, indent=2)
 
     except Exception as exc:
-        error_msg = f"Failed to fetch images from Unsplash: {exc}"
-        print(f"   ❌  {error_msg}")
-        return error_msg
+        print(f"   ⚠️  Failed to fetch images from Unsplash: {exc}. Using fallback image.")
+        return json.dumps(fallback_images, indent=2)
 
 
 # ── Tool dispatcher ───────────────────────────────────────────────────────────

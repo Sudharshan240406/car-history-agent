@@ -71,7 +71,7 @@ SYSTEM_PROMPT = (
     "Use get_car_specs to pull exact engine, horsepower, 0-60, and price figures for a specific model year when the script needs precise numbers. "
     "Use get_car_images after researching to fetch relevant high-quality car photos for visual assets. "
     "Keep tone punchy and factual, no fluff intro. "
-    "Once the script is finalized, save it using save_script with a clear filename based on the topic."
+    "IMPORTANT: You MUST call save_script to save the finalized script with a clear filename based on the topic."
 )
 
 # ── Tool implementations ───────────────────────────────────────────────────────
@@ -365,6 +365,7 @@ def run_agent(topic: str) -> dict:
 
     # Captures the save_script call and get_car_images call for the return value
     _saved: dict = {"script": "", "filename": "", "images": []}
+    _last_text: list[str] = []
 
     iteration = 0
 
@@ -420,6 +421,7 @@ def run_agent(topic: str) -> dict:
             combined = "\n".join(text_parts).strip()
             if combined:
                 print(f"\n🤖 Gemini:\n{combined}\n")
+                _last_text.append(combined)
 
         # ── No function calls → model is done ─────────────────────────────────
         if not fc_parts:
@@ -475,8 +477,8 @@ def run_agent(topic: str) -> dict:
     print("  Run complete.")
     print(f"{'='*60}\n")
 
-    script   = _saved["script"]
-    filename = _saved["filename"]
+    script   = _saved["script"] or "\n\n".join(_last_text).strip()
+    filename = _saved["filename"] or topic.strip().lower().replace(" ", "_")
     images   = _saved.get("images", [])
     return {
         "script":    script,

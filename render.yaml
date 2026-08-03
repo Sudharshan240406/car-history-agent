@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: car-history-agent
+    runtime: python
+    region: oregon          # free tier region; change to frankfurt/singapore if preferred
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false          # means: set manually in Render dashboard, never committed here
+      - key: PYTHON_VERSION
+        value: "3.11"

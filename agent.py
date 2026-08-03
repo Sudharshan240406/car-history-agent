@@ -378,9 +378,12 @@ def run_agent(topic: str) -> dict:
     while True:
         iteration += 1
         print(f"── Agent turn {iteration} ─────────────────────────────────────")
+        if iteration > 1:
+            import time
+            time.sleep(2)
 
         response = None
-        for attempt in range(5):
+        for attempt in range(6):
             try:
                 response = client.models.generate_content(
                     model=MODEL,
@@ -390,9 +393,10 @@ def run_agent(topic: str) -> dict:
                 break
             except Exception as exc:
                 if "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc):
-                    print(f"   ⏳ Hit rate limit (429). Waiting 4s before retry... (Attempt {attempt+1}/5)")
+                    wait_sec = (attempt + 1) * 5
+                    print(f"   ⏳ Hit rate limit (429). Waiting {wait_sec}s before retry... (Attempt {attempt+1}/6)")
                     import time
-                    time.sleep(4)
+                    time.sleep(wait_sec)
                 else:
                     raise exc
 
